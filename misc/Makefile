@@ -10,6 +10,9 @@ ifeq ($(HAVE_BERKELEY_DB),y)
 	TARGETS += arpd
 endif
 
+LDLIBS += $(shell $(PKG_CONFIG) --libs libxo)
+CFLAGS += $(shell $(PKG_CONFIG) --cflags libxo)
+
 all: $(TARGETS)
 
 ss: $(SSOBJ)
