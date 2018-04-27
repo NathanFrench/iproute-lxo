@@ -723,7 +723,7 @@ find_entry(unsigned int ino, char ** buf, int type)
             switch (type) {
                 case USERS:
                     xo_open_instance("proc-info");
-                    xo_emit("({q:process},{L:Pid}={:pid/%d},{L:fd}={:fd/%d})",
+                    xo_emit("({q:process},{L:pid}={:pid/%d},{L:fd}={:fd/%d})",
                     p->process,
                     p->pid,
                     p->fd);
@@ -799,7 +799,7 @@ emit_process_info(const char * name, unsigned int ino, int type)
                 case USERS:
                     xo_open_instance(name);
                     xo_emit("{D:(}");
-                    xo_emit("{q:process},{L:Pid}={:pid/%d},{L:fd}={:fd/%d}",
+                    xo_emit("{q:process},{L:pid}={:pid/%d},{L:fd}={:fd/%d}",
                     p->process,
                     p->pid,
                     p->fd);
