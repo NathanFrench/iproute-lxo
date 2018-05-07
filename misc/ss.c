@@ -1543,10 +1543,10 @@ sock_state_print(struct sockstat * s)
     } else {
         field_set(COL_NETID);
         /*out("%s", sock_name); */
-        xo_emit("{:netid}", sock_name);
+        xo_emit("{:netid} ", sock_name);
         field_set(COL_STATE);
         /*out("%s", sstate_name[s->state]); */
-        xo_emit("{P: }{:state}", sstate_name[s->state]);
+        xo_emit("{P: }{:state} ", sstate_name[s->state]);
     }
 
     field_set(COL_RECVQ);
@@ -1583,7 +1583,6 @@ sock_details_print(struct sockstat * s)
         /*out(" fwmark:0x%x", s->mark); */
     }
 
-    xo_emit("\n");
 }
 
 static void
@@ -1595,7 +1594,7 @@ sock_addr_print(const char * addr, char * delim, const char * port,
         xo_emit("{P: }{:addr}\%\%{:ifname}{d:delim} ", addr, ifname, delim);
     } else {
         /*out("%s%s", addr, delim); */
-        xo_emit("{P: }{tq:addr}{d:delim}", addr, delim);
+        xo_emit("{P: }{tq:addr}{d:delim} ", addr, delim);
     }
 
     field_next();
@@ -2604,6 +2603,7 @@ inet_stats_print(struct sockstat * s, bool v6only)
     inet_addr_print(&s->remote, s->rport, 0, v6only);
     xo_close_container("remote");
 
+    xo_emit("\n");
     proc_ctx_print(s);
 }
 
@@ -3090,6 +3090,7 @@ tcp_show_line(char * line, const struct filter * f, int family)
         tcp_stats_print(&s);
     }
 
+    xo_emit("\n");
     return 0;
 } /* tcp_show_line */
 
@@ -3495,6 +3496,13 @@ inet_show_sock(struct nlmsghdr * nlh,
         xo_close_container("options");
     }
 
+#ifndef RCV_SHUTDOWN
+#define RCV_SHUTDOWN    1
+#endif
+#ifndef SEND_SHUTDOWN
+#define SEND_SHUTDOWN   2
+#endif
+
     if (show_details) {
         xo_open_container("details");
         sock_details_print(s);
@@ -3513,7 +3521,14 @@ inet_show_sock(struct nlmsghdr * nlh,
 
             char tmp[4];
             sprintf(tmp, "%c-%c", mask & 1 ? '-' : '<', mask & 2 ? '-' : '>');
-            xo_emit("{P: }{:shutdown-mask}", tmp);
+
+            if (xo_get_style(NULL) == XO_STYLE_TEXT) {
+                xo_emit("{P: }{:shutdown-mask}", tmp);
+            } else {
+                xo_emit("{P: }{n:recv-shutdown}-{n:send-shutdown} ", 
+                    (mask & RCV_SHUTDOWN) ? "true" : "false",
+                    (mask & SEND_SHUTDOWN) ? "true" : "false"); 
+            }
         }
         xo_close_container("details");
     }
@@ -3533,6 +3548,8 @@ inet_show_sock(struct nlmsghdr * nlh,
         xo_emit("\n");
         xo_close_container("info");
     }
+
+
     sctp_ino = s->ino;
 
     return 0;
@@ -4201,6 +4218,7 @@ unix_show_sock(const struct sockaddr_nl * addr, struct nlmsghdr * nlh,
     if (unix_type_skip(&stat, f)) {
         return 0;
     }
+    
 
     if (tb[UNIX_DIAG_RQLEN]) {
         struct unix_diag_rqlen * rql = RTA_DATA(tb[UNIX_DIAG_RQLEN]);
@@ -4232,11 +4250,14 @@ unix_show_sock(const struct sockaddr_nl * addr, struct nlmsghdr * nlh,
         return 0;
     }
 
+    xo_open_instance("socket");
+
     unix_stats_print(&stat, f);
 
     if (show_mem) {
         print_skmeminfo(tb, UNIX_DIAG_MEMINFO);
     }
+
     if (show_details) {
         if (tb[UNIX_DIAG_SHUTDOWN]) {
             unsigned char mask;
@@ -4247,6 +4268,7 @@ unix_show_sock(const struct sockaddr_nl * addr, struct nlmsghdr * nlh,
         }
     }
 
+    xo_close_instance("socket");
     return 0;
 } /* unix_show_sock */
 
@@ -4280,6 +4302,8 @@ Exit:
 static int
 unix_show_netlink(struct filter * f)
 {
+    int res;
+
     DIAG_REQUEST(req, struct unix_diag_req r);
 
     req.r.sdiag_family = AF_UNIX;
@@ -4289,7 +4313,13 @@ unix_show_netlink(struct filter * f)
         req.r.udiag_show |= UDIAG_SHOW_MEMINFO;
     }
 
-    return handle_netlink_request(f, &req.nlh, sizeof(req), unix_show_sock);
+    xo_open_instance("unix");
+    xo_open_list("socket");
+    res = handle_netlink_request(f, &req.nlh, sizeof(req), unix_show_sock);
+    xo_close_list("socket");
+    xo_close_instance("socket");
+
+    return res;
 }
 
 static int
@@ -4469,13 +4499,20 @@ packet_stats_print(struct sockstat * s, const struct filter * f)
         port = xll_index_to_name(s->iface);
     }
 
+    xo_open_container("local");
     sock_addr_print(addr, ":", port, NULL);
+    xo_close_container("local");
+
+    xo_open_container("remote");
     sock_addr_print("", "*", "", NULL);
+    xo_close_container("remote");
 
     proc_ctx_print(s);
 
     if (show_details) {
+        xo_open_container("details");
         sock_details_print(s);
+        xo_close_container("details");
     }
 
     return 0;
@@ -4484,12 +4521,23 @@ packet_stats_print(struct sockstat * s, const struct filter * f)
 static void
 packet_show_ring(struct packet_diag_ring * ring)
 {
-    out("blk_size:%d", ring->pdr_block_size);
-    out(",blk_nr:%d", ring->pdr_block_nr);
-    out(",frm_size:%d", ring->pdr_frame_size);
-    out(",frm_nr:%d", ring->pdr_frame_nr);
-    out(",tmo:%d", ring->pdr_retire_tmo);
-    out(",features:0x%x", ring->pdr_features);
+    //out("blk_size:%d", ring->pdr_block_size);
+    xo_emit("{Lc:blk_size}{:block-size/%d}", ring->pdr_block_size);
+
+    //out(",blk_nr:%d", ring->pdr_block_nr);
+    xo_emit(",{Lc:blk_nr}{:block-number/%d}", ring->pdr_block_nr);
+    
+    //out(",frm_size:%d", ring->pdr_frame_size);
+    xo_emit(",{Lc:frm_size}{:frame-size/%d}", ring->pdr_frame_size);
+
+    //out(",frm_nr:%d", ring->pdr_frame_nr);
+    xo_emit(",{Lc:frm_nr}{:frame-number/%d}",  ring->pdr_frame_nr);
+
+    //out(",tmo:%d", ring->pdr_retire_tmo);
+    xo_emit(",{Lc:tmo}{:retire-tmo/%d}", ring->pdr_retire_tmo);
+
+    //out(",features:0x%x", ring->pdr_features);
+    xo_emit(",{Lc:features}0x{:features/%x}", ring->pdr_features);
 }
 
 static int
@@ -4512,6 +4560,8 @@ packet_show_sock(const struct sockaddr_nl * addr,
     if (!tb[PACKET_DIAG_MEMINFO]) {
         return -1;
     }
+
+    xo_open_instance("socket");
 
     stat.type  = r->pdiag_type;
     stat.prot  = r->pdiag_num;
@@ -4553,38 +4603,70 @@ packet_show_sock(const struct sockaddr_nl * addr,
 
     if (show_details) {
         if (pinfo) {
-            out("\n\tver:%d", pinfo->pdi_version);
-            out(" cpy_thresh:%d", pinfo->pdi_copy_thresh);
-            out(" flags( ");
+            xo_open_container("pdi-info");
+            //out("\n\tver:%d", pinfo->pdi_version);
+            xo_emit("\n\t{Lc:ver}{:packet-version/%d}", pinfo->pdi_version);
+            //out(" cpy_thresh:%d", pinfo->pdi_copy_thresh);
+            xo_emit("{P: }{Lc:cpy_thresh}{:copy-threshold/%d}", pinfo->pdi_copy_thresh);
+            //out(" flags( ");
+            xo_emit("{P: }{T:/flags}{D:(} ");
+            xo_open_list("pdi-flags");
+            //xo_open_instance("flags");
+
             if (pinfo->pdi_flags & PDI_RUNNING) {
-                out("running");
+                //out("running");
+                xo_emit("{lq:running/running}");
+
             }
+
             if (pinfo->pdi_flags & PDI_AUXDATA) {
-                out(" auxdata");
+                //out(" auxdata");
+                xo_emit(" {lq:auxdata/auxdata}");
             }
             if (pinfo->pdi_flags & PDI_ORIGDEV) {
-                out(" origdev");
+                //out(" origdev");
+                xo_emit(" {lq:origdev/origdev}");
             }
+
             if (pinfo->pdi_flags & PDI_VNETHDR) {
-                out(" vnethdr");
+                //out(" vnethdr");
+                xo_emit(" {lq:vnethdr/vnethdr}");
             }
+
             if (pinfo->pdi_flags & PDI_LOSS) {
-                out(" loss");
+                //out(" loss");
+                xo_emit(" {lq:loss/loss}");
             }
             if (!pinfo->pdi_flags) {
-                out("0");
+                //out("0");
+                xo_emit("{ld:0/0}");
             }
-            out(" )");
+
+            //out(" )");
+            xo_close_list("pdi-flags");
+            xo_emit("{P: }{D:)}");
+        
+            xo_close_container("pdi-info");
         }
         if (ring_rx) {
-            out("\n\tring_rx(");
+            xo_open_container("rx-ring");
+            
+            //out("\n\tring_rx(");
+            xo_emit("\n\t{T:/ring_rx}{D:(}");
             packet_show_ring(ring_rx);
-            out(")");
+
+            //out(")");
+            xo_emit("{D:)}");
+            xo_close_container("rx-ring");
         }
         if (ring_tx) {
-            out("\n\tring_tx(");
+            //out("\n\tring_tx(");
+            xo_open_container("tx-ring");
+            xo_emit("\n\t{T:/ring_tx}{D:(}");
             packet_show_ring(ring_tx);
-            out(")");
+            //out(")");
+            xo_emit("{D:)}");
+            xo_close_container("tx-ring");
         }
         if (has_fanout) {
             uint16_t type = (fanout >> 16) & 0xffff;
@@ -4625,31 +4707,51 @@ packet_show_sock(const struct sockaddr_nl * addr,
         int num = RTA_PAYLOAD(tb[PACKET_DIAG_FILTER]) /
                   sizeof(struct sock_filter);
 
-        out("\n\tbpf filter (%d): ", num);
+        xo_emit("\n\t{Twc:/bpf filter (%d)}", num);
+        xo_open_list("bpf-filter");
+
+        //out("\n\tbpf filter (%d): ", num);
         while (num) {
-            out(" 0x%02x %u %u %u,",
-                fil->code, fil->jt, fil->jf, fil->k);
+            xo_open_instance("bpf-filter");
+            //out(" 0x%02x %u %u %u,", fil->code, fil->jt, fil->jf, fil->k);
+            xo_emit(" {:code/%#x} {n:jump-if-true/%u} {:jump-if-false/%u} {:k/%u},",
+                    fil->code, fil->jt, fil->jf, fil->k);
+            xo_close_instance("bpf-filter");
             num--;
             fil++;
         }
+
+        xo_close_list("bpf-filter");
     }
 
     if (show_mem) {
         print_skmeminfo(tb, PACKET_DIAG_MEMINFO);
     }
+
+    xo_emit("\n");
+    xo_close_instance("socket");
     return 0;
 } /* packet_show_sock */
 
 static int
 packet_show_netlink(struct filter * f)
 {
+    int res;
+
     DIAG_REQUEST(req, struct packet_diag_req r);
 
     req.r.sdiag_family = AF_PACKET;
     req.r.pdiag_show   = PACKET_SHOW_INFO | PACKET_SHOW_MEMINFO |
                          PACKET_SHOW_FILTER | PACKET_SHOW_RING_CFG | PACKET_SHOW_FANOUT;
 
-    return handle_netlink_request(f, &req.nlh, sizeof(req), packet_show_sock);
+    xo_open_instance("packet");
+    xo_open_list("socket");
+    res = handle_netlink_request(f, &req.nlh, sizeof(req), packet_show_sock);
+    xo_close_list("socket");
+    xo_close_instance("packet");
+
+
+    return res;
 }
 
 static int
@@ -4780,8 +4882,11 @@ netlink_show_one(struct filter * f,
         int_to_str(pid, procname);
     }
 
+    xo_open_container("local");
     sock_addr_print(prot_name, ":", procname, NULL);
+    xo_close_container("local");
 
+    xo_open_container("remote");
     if (state == NETLINK_CONNECTED) {
         char dst_group_buf[30];
         char dst_pid_buf[30];
@@ -4791,6 +4896,7 @@ netlink_show_one(struct filter * f,
     } else {
         sock_addr_print("", "*", "", NULL);
     }
+    xo_close_container("remote");
 
     char * pid_context = NULL;
 
@@ -4813,7 +4919,10 @@ netlink_show_one(struct filter * f,
     }
 
     if (show_details) {
-        out(" sk=%llx cb=%llx groups=0x%08x", sk, cb, groups);
+        xo_open_container("details");
+        //out(" sk=%llx cb=%llx groups=0x%08x", sk, cb, groups);
+        xo_emit(" {L:sk}={:sk/%#llx} {L:cb}={:cb/%llx} groups={:groups/%#08x}", sk, cb, groups);
+        xo_close_container("details");
     }
 
     return 0;
@@ -4828,6 +4937,8 @@ netlink_show_sock(const struct sockaddr_nl * addr,
     struct rtattr * tb[NETLINK_DIAG_MAX + 1];
     int rq = 0, wq = 0;
     unsigned long groups = 0;
+
+    xo_open_instance("socket");
 
     parse_rtattr(tb, NETLINK_DIAG_MAX, (struct rtattr *)(r + 1),
         nlh->nlmsg_len - NLMSG_LENGTH(sizeof(*r)));
@@ -4848,27 +4959,40 @@ netlink_show_sock(const struct sockaddr_nl * addr,
     if (netlink_show_one(f, r->ndiag_protocol, r->ndiag_portid, groups,
             r->ndiag_state, r->ndiag_dst_portid, r->ndiag_dst_group,
             rq, wq, 0, 0)) {
+        xo_close_instance("socket");
         return 0;
     }
 
     if (show_mem) {
-        out("\t");
+        //out("\t");
+        xo_emit("\t\n");
         print_skmeminfo(tb, NETLINK_DIAG_MEMINFO);
     }
 
+    xo_emit("\n");
+    xo_close_instance("socket");
     return 0;
 }
 
 static int
 netlink_show_netlink(struct filter * f)
 {
+    int res;
+
     DIAG_REQUEST(req, struct netlink_diag_req r);
 
     req.r.sdiag_family   = AF_NETLINK;
     req.r.sdiag_protocol = NDIAG_PROTO_ALL;
     req.r.ndiag_show     = NDIAG_SHOW_GROUPS | NDIAG_SHOW_MEMINFO;
 
-    return handle_netlink_request(f, &req.nlh, sizeof(req), netlink_show_sock);
+    xo_open_instance("netlink");
+    xo_open_list("socket");
+    res = handle_netlink_request(f, &req.nlh, sizeof(req), netlink_show_sock);
+    xo_close_list("socket");
+    xo_emit("\n");
+    xo_close_instance("netlink");
+
+    return res;
 }
 
 static int
@@ -5922,7 +6046,7 @@ main(int argc, char * argv[])
         user_ent_destroy();
     }
 
-    /*render(); */
+//    render();
     xo_close_container("ss");
     xo_flush();
     xo_finish();
