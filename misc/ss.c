@@ -5983,7 +5983,7 @@ main(int argc, char * argv[])
         exit(handle_follow_request(&current_filter));
     }
 
-    xo_open_container("ss");
+//    xo_open_container("ss");
 
     if (current_filter.dbs & (1 << NETLINK_DB))
     {
@@ -6047,7 +6047,7 @@ main(int argc, char * argv[])
     }
 
 //    render();
-    xo_close_container("ss");
+//    xo_close_container("ss");
     xo_flush();
     xo_finish();
 
