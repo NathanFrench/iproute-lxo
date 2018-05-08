@@ -1539,7 +1539,7 @@ sock_state_print(struct sockstat * s)
     if (is_sctp_assoc(s, sock_name)) {
         field_set(COL_STATE);                   /* Empty Netid field */
         /*out("`- %s", sctp_sstate_name[s->state]); */
-        xo_emit("`-{P: }{:network-id}\n", sctp_sstate_name[s->state]);
+        xo_emit("`-{P: }{:state}", sctp_sstate_name[s->state]);
     } else {
         field_set(COL_NETID);
         /*out("%s", sock_name); */
@@ -4191,9 +4191,15 @@ unix_stats_print(struct sockstat * s, struct filter * f)
 
     sock_state_print(s);
 
+    xo_open_container("local");
     sock_addr_print(s->name ? : "*", " ", int_to_str(s->lport, port_name), NULL);
-    sock_addr_print(s->peer_name ? : "*", " ", int_to_str(s->rport, port_name), NULL);
+    xo_close_container("local");
 
+    xo_open_container("remote");
+    sock_addr_print(s->peer_name ? : "*", " ", int_to_str(s->rport, port_name), NULL);
+    xo_close_container("remote");
+
+    xo_emit("\n");
     proc_ctx_print(s);
 }
 
@@ -4268,6 +4274,7 @@ unix_show_sock(const struct sockaddr_nl * addr, struct nlmsghdr * nlh,
         }
     }
 
+    xo_emit("\n");
     xo_close_instance("socket");
     return 0;
 } /* unix_show_sock */
